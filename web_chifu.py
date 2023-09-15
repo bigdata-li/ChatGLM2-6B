@@ -8,13 +8,103 @@ import torch
 from docx import Document
 import time
 import PyPDF2
+import requests
+from bs4 import BeautifulSoup
+import io
 
 ARTICLE_PROMPT_FOLDER = 'article_summary_prompts'
 REPORT_PROMPT_FOLDER = 'report_summary_prompts'
 
-import requests
-from bs4 import BeautifulSoup
-import io
+# Global variables to store current selector and selected item
+current_selector = None
+current_selected_item = None
+
+status_state = gr.State("Welcome to ChifuGPT!")
+
+def log(message):
+    print(f"++++ {message}")
+
+# Load content of a prompt file
+def load_prompt_content(folder_path, prompt_file_name):
+    file_path = buildPromptFileFullPath(folder_path, prompt_file_name)
+    with open(file_path, 'r', encoding='utf-8') as file:
+        return file.read()
+
+# Save content to a prompt file
+def save_prompt_content(folder_path, prompt_file_name, content):
+    file_path = buildPromptFileFullPath(folder_path, prompt_file_name)
+    with open(file_path, 'w', encoding='utf-8') as file:
+        file.write(content)
+        
+def update_status(message):
+    status_state.value = message
+    status_label.update(value=status_state.value)
+
+# Callback for article_prompt_selector and report_prompt_selector
+def on_selector_change(evt: gr.SelectData, selector_type: str, content_folder: str):
+    global current_selector, current_selected_item, status_state
+    current_selected_item = evt.value
+    current_selector = selector_type
+
+    log(f"Selected {current_selected_item} in {current_selector}")
+
+    content = load_prompt_content(content_folder, current_selected_item)
+    log(f"Loaded content of {current_selected_item} in {current_selector}: {content}")
+
+    update_status(f"Selected {current_selected_item} in {current_selector}")
+    
+    return content, status_state.value
+
+def on_article_selector_change(evt: gr.SelectData):
+    return on_selector_change(evt, 'Article', ARTICLE_PROMPT_FOLDER)
+
+def on_report_selector_change(evt: gr.SelectData):
+    return on_selector_change(evt, 'Report', REPORT_PROMPT_FOLDER)
+
+
+# Callback for save button
+def save_changes(content):
+    if not current_selector or not current_selected_item:
+        update_status("No current selector or selected item to save to.")
+        return
+    if current_selector == 'Article':
+        save_prompt_content(ARTICLE_PROMPT_FOLDER, current_selected_item, content)
+    else:
+        save_prompt_content(REPORT_PROMPT_FOLDER, current_selected_item, content)
+    
+    update_status(f"Saved changes to {current_selected_item} in {current_selector}")
+    
+    log(f"Updated prompt file {current_selected_item} of {current_selector}")
+
+def create_new_prompt(content):
+    if not current_selector:
+        update_status("No current selector to save to.")
+        return
+    
+    # Ask the user for the name of the new prompt file
+    new_file_name = gr.inputs.get_text("Enter the name for the new prompt file (without .txt):")
+    
+    if not new_file_name:
+        update_status("Prompt creation cancelled or provided name is empty.")
+        return
+    
+    if current_selector == 'Article':
+        folder_path = ARTICLE_PROMPT_FOLDER
+    else:
+        folder_path = REPORT_PROMPT_FOLDER
+
+    # Save the content to the new prompt file
+    save_prompt_content(folder_path, new_file_name, content)
+
+    # Refresh the current_selector control to reload from its folder
+    if current_selector == 'Article':
+        article_summary_prompts[:] = load_prompts_from_folder(ARTICLE_PROMPT_FOLDER)
+        article_prompt_selector.choices = article_summary_prompts
+    else:
+        report_summary_prompts[:] = load_prompts_from_folder(REPORT_PROMPT_FOLDER)
+        report_prompt_selector.choices = report_summary_prompts
+
+    update_status(f"Created new prompt file {new_file_name}.txt in {current_selector}")
 
 def process_uploaded_files(file_wrappers):
     """
@@ -206,6 +296,8 @@ def find_urls(text):
 
 
 def predict(input, uploaded_files, chatbot, max_length, top_p, temperature, history, past_key_values, downloadUrlContent=False):
+    old_input_length = len(input)
+
     if uploaded_files:
         file_contents = process_uploaded_files(uploaded_files)
         input += "\n" + file_contents
@@ -223,7 +315,8 @@ def predict(input, uploaded_files, chatbot, max_length, top_p, temperature, hist
 
     chatbot.append((parse_text(input), ""))
 
-    print(f"++++ Predicting started. input_length={len(input)}")
+    update_status(f"Predicting started. input_length={len(input)} old_input_length={old_input_length}")
+    log(status_state.value)
 
     # Get the current time before the loop starts
     start_time = time.time()
@@ -233,13 +326,17 @@ def predict(input, uploaded_files, chatbot, max_length, top_p, temperature, hist
                                                                 max_length=max_length, top_p=top_p,
                                                                 temperature=temperature):
         chatbot[-1] = (parse_text(input), parse_text(response))
-        yield chatbot, history, past_key_values
+        update_status(f"Predicting in progress. input_length={len(input)} response_length={len(response)}")
+        yield chatbot, history, past_key_values, status_state.value
 
     # Calculate the time difference after the loop completes
     end_time = time.time()
     duration = end_time - start_time
 
-    print(f"++++ Prediction completed in {duration:.2f} seconds. input_length={len(input)} and response_length={len(response)}")
+    status_message = f"Prediction completed in {duration:.2f} seconds. input_length={len(input)} and response_length={len(response)}"
+    log(status_message)
+    update_status(status_message)
+    yield chatbot, history, past_key_values, status_state.value
 
 
 def reset_user_input():
@@ -268,17 +365,22 @@ with gr.Blocks() as demo:
     with gr.Row():
         with gr.Column(scale=2):
             with gr.Column(scale=4):
-                user_input = gr.Textbox(show_label=False, placeholder="Input...", lines=12).style(container=False)
+                user_input = gr.Textbox(show_label=False, placeholder="Input...", lines=12, container=False)
             with gr.Column(scale=1):
-                file_uploads = gr.Files(label="上傳本地Word/PDF/HTML文檔以嵌入提示", file_count="multiple", height=100)
+                file_uploads = gr.Files(label="上傳本地Word/PDF/HTML文檔以嵌入提示", file_count="multiple")
                 downloadUrlContent = gr.Checkbox(label="下載並嵌入提示中的http鏈接文章", value=True)
                 submitBtn = gr.Button("Submit", variant="primary")
+                # save_button = gr.Button(label="Save", function=save_changes, inputs="user_input")
+                with gr.Row():
+                    save_button = gr.Button("Save Prompt")
+                    create_prompt_button = gr.Button("Create Prompt")
         with gr.Column(scale=2): # Adjust the 'scale' as per your design
             article_prompt_selector = gr.Dropdown(choices=article_summary_prompts, label="Choose article-summary prompt")
             report_prompt_selector = gr.Dropdown(choices=report_summary_prompts, label="Choose report-summary prompt")
             
             article_urls = gr.Textbox(label="引用文章鏈接列表", lines=5, placeholder="Enter URLs (one per line)", container=False)
             generate_report_btn = gr.Button("Generate Report")
+            status_label = gr.Textbox(label="Status", interactive=False, value=status_state.value)
         with gr.Column(scale=1):
             emptyBtn = gr.Button("Clear History")
             max_length = gr.Slider(0, 32768, value=8192, step=1.0, label="Maximum length", interactive=True)
@@ -290,8 +392,14 @@ with gr.Blocks() as demo:
     history = gr.State([])
     past_key_values = gr.State(None)
 
+    save_button.click(save_changes, [user_input], show_progress=True)
+    create_prompt_button.click(create_new_prompt, [user_input], show_progress=True)
+
+    article_prompt_selector.select(on_article_selector_change, None, [user_input, status_label])
+    report_prompt_selector.select(on_report_selector_change, None, [user_input, status_label])
+
     submitBtn.click(predict, [user_input, file_uploads, chatbot, max_length, top_p, temperature, history, past_key_values, downloadUrlContent],
-                    [chatbot, history, past_key_values], show_progress=True)
+                    [chatbot, history, past_key_values, status_label], show_progress=True)
     submitBtn.click(reset_user_input, [], [user_input])
 
     emptyBtn.click(reset_state, outputs=[chatbot, history, past_key_values], show_progress=True)
