@@ -29,12 +29,6 @@ def load_prompt_content(folder_path, prompt_file_name):
     file_path = buildPromptFileFullPath(folder_path, prompt_file_name)
     with open(file_path, 'r', encoding='utf-8') as file:
         return file.read()
-
-# Save content to a prompt file
-def save_prompt_content(folder_path, prompt_file_name, content):
-    file_path = buildPromptFileFullPath(folder_path, prompt_file_name)
-    with open(file_path, 'w', encoding='utf-8') as file:
-        file.write(content)
         
 def update_status(message):
     status_state.value = message
@@ -51,9 +45,9 @@ def on_selector_change(evt: gr.SelectData, selector_type: str, content_folder: s
     content = load_prompt_content(content_folder, current_selected_item)
     log(f"Loaded content of {current_selected_item} in {current_selector}: {content}")
 
-    update_status(f"Selected {current_selected_item} in {current_selector}")
+    update_status(f"加載了提示詞文件 {current_selected_item} of {current_selector}。可以選擇'保存或創建提示詞文件'或者編輯新文件名後點擊保存")
     
-    return content, status_state.value
+    return content, status_state.value, current_selected_item
 
 def on_article_selector_change(evt: gr.SelectData):
     return on_selector_change(evt, 'Article', ARTICLE_PROMPT_FOLDER)
@@ -61,50 +55,70 @@ def on_article_selector_change(evt: gr.SelectData):
 def on_report_selector_change(evt: gr.SelectData):
     return on_selector_change(evt, 'Report', REPORT_PROMPT_FOLDER)
 
+def on_dropdown_change_article(selected_option):
+    selectorType = 'Article'
+    # Bug per https://github.com/gradio-app/gradio/issues/5515
+    # update_status(f"Changed custom value: {selected_option} in {selectorType}")
+    log(f"Changed custom value: {selected_option} in {selectorType}.")
+    return status_state.value
+
+def on_dropdown_change_report(selected_option):
+    selectorType = 'Report'
+    # update_status(f"Changed custom value: {selected_option} in {selectorType}")
+    log(f"Changed custom value: {selected_option} in {selectorType}")
+    return status_state.value
+
+# Save content to a prompt file
+def save_prompt_content(folder_path, prompt_file_name, content, overwriteExist):
+    file_path = buildPromptFileFullPath(folder_path, prompt_file_name)
+    fileExist = os.path.exists(file_path)
+    if fileExist and not overwriteExist:
+        update_status(f"提示詞文件 {prompt_file_name} of {folder_path} 已經存在，請勾選'覆蓋已存在文件'。")
+        return False
+
+    saveOrCreate = "保存" if fileExist else "創建"
+    saveOrUpdateEnglish = "Saving" if fileExist else "Creating"
+
+    log(f"{saveOrUpdateEnglish} prompt file {prompt_file_name} of {folder_path}...")
+    
+    try:
+        with open(file_path, 'w', encoding='utf-8') as file:
+            file.write(content)
+        
+        update_status(f"{saveOrCreate}提示詞文件 {prompt_file_name} of {folder_path} 成功")
+        return True
+    except IOError as e:
+        log(f"{saveOrCreate}提示詞文件 {prompt_file_name} of {folder_path} 失敗。Error: {e}")
+        update_status(f"IOError: Failed to write to {file_path}. Error: {e}")
+        return False
 
 # Callback for save button
-def save_changes(content):
-    if not current_selector or not current_selected_item:
-        update_status("No current selector or selected item to save to.")
-        return
-    if current_selector == 'Article':
-        save_prompt_content(ARTICLE_PROMPT_FOLDER, current_selected_item, content)
-    else:
-        save_prompt_content(REPORT_PROMPT_FOLDER, current_selected_item, content)
-    
-    update_status(f"Saved changes to {current_selected_item} in {current_selector}")
-    
-    log(f"Updated prompt file {current_selected_item} of {current_selector}")
+def save_create_prompt_file(content, overwriteExistFile):
+    try:
+        if not current_selector or not current_selected_item:
+            update_status("請先選擇提示詞類型。")
+            return
+        
+        if content == "":
+            update_status("請先輸入提示詞內容。")
+            return
+        
+        folder_path = ARTICLE_PROMPT_FOLDER if current_selector == 'Article' else REPORT_PROMPT_FOLDER
 
-def create_new_prompt(content):
-    if not current_selector:
-        update_status("No current selector to save to.")
-        return
-    
-    # Ask the user for the name of the new prompt file
-    new_file_name = gr.inputs.get_text("Enter the name for the new prompt file (without .txt):")
-    
-    if not new_file_name:
-        update_status("Prompt creation cancelled or provided name is empty.")
-        return
-    
-    if current_selector == 'Article':
-        folder_path = ARTICLE_PROMPT_FOLDER
-    else:
-        folder_path = REPORT_PROMPT_FOLDER
+        # Save the content to the new prompt file
+        if not save_prompt_content(folder_path, current_selected_item, content, overwriteExistFile):
+            return
 
-    # Save the content to the new prompt file
-    save_prompt_content(folder_path, new_file_name, content)
+        # Refresh the current_selector control to reload from its folder
+        if current_selector == 'Article':
+            article_summary_prompts[:] = load_prompts_from_folder(ARTICLE_PROMPT_FOLDER)
+            article_prompt_selector.choices = article_summary_prompts
+        else:
+            report_summary_prompts[:] = load_prompts_from_folder(REPORT_PROMPT_FOLDER)
+            report_prompt_selector.choices = report_summary_prompts
 
-    # Refresh the current_selector control to reload from its folder
-    if current_selector == 'Article':
-        article_summary_prompts[:] = load_prompts_from_folder(ARTICLE_PROMPT_FOLDER)
-        article_prompt_selector.choices = article_summary_prompts
-    else:
-        report_summary_prompts[:] = load_prompts_from_folder(REPORT_PROMPT_FOLDER)
-        report_prompt_selector.choices = report_summary_prompts
-
-    update_status(f"Created new prompt file {new_file_name}.txt in {current_selector}")
+    finally:
+        return status_state.value
 
 def process_uploaded_files(file_wrappers):
     """
@@ -372,11 +386,13 @@ with gr.Blocks() as demo:
                 submitBtn = gr.Button("Submit", variant="primary")
                 # save_button = gr.Button(label="Save", function=save_changes, inputs="user_input")
                 with gr.Row():
-                    save_button = gr.Button("Save Prompt")
-                    create_prompt_button = gr.Button("Create Prompt")
+                    overwriteExistPromptFile = gr.Checkbox(label="覆蓋已存在文件", value=False)
+                    save_button = gr.Button("保存或創建提示詞文件")
+                    promptFileName = gr.Textbox(show_label=False, lines=1, container=False)
+            
         with gr.Column(scale=2): # Adjust the 'scale' as per your design
-            article_prompt_selector = gr.Dropdown(choices=article_summary_prompts, label="Choose article-summary prompt")
-            report_prompt_selector = gr.Dropdown(choices=report_summary_prompts, label="Choose report-summary prompt")
+            article_prompt_selector = gr.Dropdown(choices=article_summary_prompts, label="Choose article-summary prompt") #, allow_custom_value=True)
+            report_prompt_selector = gr.Dropdown(choices=report_summary_prompts, label="Choose report-summary prompt") #, allow_custom_value=True)
             
             article_urls = gr.Textbox(label="引用文章鏈接列表", lines=5, placeholder="Enter URLs (one per line)", container=False)
             generate_report_btn = gr.Button("Generate Report")
@@ -392,11 +408,14 @@ with gr.Blocks() as demo:
     history = gr.State([])
     past_key_values = gr.State(None)
 
-    save_button.click(save_changes, [user_input], show_progress=True)
-    create_prompt_button.click(create_new_prompt, [user_input], show_progress=True)
+    save_button.click(save_create_prompt_file, [user_input, overwriteExistPromptFile], [status_label], show_progress=True)
+    # create_prompt_button.click(create_new_prompt, [user_input], [status_label], show_progress=True)
 
-    article_prompt_selector.select(on_article_selector_change, None, [user_input, status_label])
-    report_prompt_selector.select(on_report_selector_change, None, [user_input, status_label])
+    article_prompt_selector.select(on_article_selector_change, None, [user_input, status_label, promptFileName])
+    report_prompt_selector.select(on_report_selector_change, None, [user_input, status_label, promptFileName])
+
+    article_prompt_selector.change(on_dropdown_change_article, article_prompt_selector, status_label)
+    report_prompt_selector.change(on_dropdown_change_report, article_prompt_selector, status_label)
 
     submitBtn.click(predict, [user_input, file_uploads, chatbot, max_length, top_p, temperature, history, past_key_values, downloadUrlContent],
                     [chatbot, history, past_key_values, status_label], show_progress=True)
