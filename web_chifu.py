@@ -88,6 +88,26 @@ def save_prompt_content(folder_path, prompt_file_name, content, overwriteExist):
         update_status(f"IOError: Failed to write to {file_path}. Error: {e}")
         return False
 
+# def refreshSelectorChoices(selector_type, selected_item=None):
+#     if selector_type == 'Article':
+#         article_summary_prompts[:] = load_prompts_from_folder(ARTICLE_PROMPT_FOLDER)
+#         selected = selected_item if selected_item else article_summary_prompts[0]
+#         log(f"Refreshing article_prompt_selector with value={selected} choices={article_summary_prompts}")
+#         return gr.Dropdown.update(choices=article_summary_prompts, value=selected), status_state.value
+#     else:
+#         report_summary_prompts[:] = load_prompts_from_folder(REPORT_PROMPT_FOLDER)
+#         log(f"Refreshing report_prompt_selector with value={selected} choices={report_summary_prompts}")
+#         selected = selected_item if selected_item else report_summary_prompts[0]
+#         return gr.Dropdown.update(choices=report_summary_prompts, value=selected), status_state.value
+
+def refreshSelectorChoices(selector_type, selected_item=None):
+    folder = ARTICLE_PROMPT_FOLDER if selector_type == 'Article' else REPORT_PROMPT_FOLDER
+    prompts = load_prompts_from_folder(folder)
+    selected = selected_item or prompts[0]
+    
+    log(f"Refreshing {selector_type}_prompt_selector with value={selected} choices={prompts}")
+    return gr.Dropdown.update(choices=prompts, value=selected), status_state.value
+
 def save_create_prompt_file_article(content, selected_item, overwriteExistFile, promptFileName):
     return save_create_prompt_file('Article', article_prompt_selector, selected_item, content, overwriteExistFile, promptFileName)
 
@@ -98,46 +118,59 @@ def save_create_prompt_file_report(content, selected_item, overwriteExistFile, p
 def save_create_prompt_file(selector_type, selector, selected_item, content, overwriteExistFile, promptFileName):
     global status_state
 
-    log(f"Before-try Saving prompt file {promptFileName} of {selector.label}... selected_item={selected_item}")
-
+    refresh_selected = selected_item
     try:
+        log(f"Before-try Saving prompt file {promptFileName} of {selector.label}... selected_item={selected_item}")
+
         if not selector or not selected_item:
             update_status(f"請先選擇{selector.label}類型。")
-            return None, status_state.value
-        
-        if content == "":
+        elif content == "":
             update_status(f"請先輸入{selector.label}內容。")
-            return None, status_state.value
-        
-        createNewFile = selected_item != promptFileName        
-        
-        folder_path = ARTICLE_PROMPT_FOLDER if selector_type == 'Article' else REPORT_PROMPT_FOLDER
-
-        log(f"Before saving prompt file {promptFileName} of {selector.label}... current_selected_item={selected_item} createNewFile={createNewFile} folder_path={folder_path}")
-
-        # Save the content to the new prompt file
-        if not save_prompt_content(folder_path, promptFileName, content, overwriteExistFile):
-            return None, status_state.value
-
-        if createNewFile:
-            log(f"Refreshing {selector.label} prompt selector...")
-
-            # current_selected_item = promptFileName
-
-            if selector_type == 'Article':
-                article_summary_prompts[:] = load_prompts_from_folder(ARTICLE_PROMPT_FOLDER)
-                log(f"Updating article_prompt_selector with choices: {article_summary_prompts}")
-                return gr.Dropdown.update(choices=article_summary_prompts), status_state.value
-            else:
-                report_summary_prompts[:] = load_prompts_from_folder(REPORT_PROMPT_FOLDER)
-                log(f"Updating report_prompt_selector with choices: {report_summary_prompts}")
-                return gr.Dropdown.update(choices=report_summary_prompts), status_state.value
         else:
-            return None, status_state.value
+            createNewFile = selected_item != promptFileName        
+            folder_path = ARTICLE_PROMPT_FOLDER if selector_type == 'Article' else REPORT_PROMPT_FOLDER
+
+            log(f"Before saving prompt file {promptFileName} of {selector.label}... current_selected_item={selected_item} createNewFile={createNewFile} folder_path={folder_path}")
+
+            # Save the content to the new prompt file
+            if save_prompt_content(folder_path, promptFileName, content, overwriteExistFile) and createNewFile:
+                refresh_selected = promptFileName
 
     finally:
         log(f"Finished saving prompt file {promptFileName} of {selector.label}.")
-        # return None, status_state.value
+        return refreshSelectorChoices(selector_type, refresh_selected)
+
+def delete_article_prompt_file(selected_item):
+    return delete_prompt_file('Article', article_prompt_selector, selected_item)
+
+def delete_report_prompt_file(selected_item):
+    return delete_prompt_file('Report', report_prompt_selector, selected_item)
+
+def delete_prompt_file(selector_type, selector, selected_item):
+    global status_state
+
+    if not selector or not selected_item:
+        update_status(f"請先選擇{selector.label}類型。")
+        return None, status_state.value
+
+    folder_path = ARTICLE_PROMPT_FOLDER if selector_type == 'Article' else REPORT_PROMPT_FOLDER
+    log(f"Deleting prompt file {selected_item} of {selector.label}... folder_path={folder_path}")
+
+    file_path = buildPromptFileFullPath(folder_path, selected_item)
+    fileExist = os.path.exists(file_path)
+
+    if fileExist:
+        try:
+            os.remove(file_path)
+
+            log(f"Successfully deleted prompt file {selected_item} of {selector.label}. file_path={file_path}")
+            update_status(f"成功刪除{selector.label}提示詞文件 {selected_item}")
+            
+            return refreshSelectorChoices(selector_type)
+        except IOError as e:
+            update_status(f"刪除{selector.label}提示詞文件 {selected_item}錯誤. IOError: {e}")
+    
+    return None, status_state.value
 
 def process_uploaded_files(file_wrappers):
     """
@@ -412,7 +445,7 @@ with gr.Blocks() as demo:
                         promptFileNameArticle = gr.Textbox(show_label=False, lines=1, container=False)
                     with gr.Row():
                         save_article_button = gr.Button("保存或創建", size="sm", scale=0.5, min_width=100)
-                        delete_article_prompt = gr.Button("刪除", size="sm", scale=0.5, min_width=100)
+                        delete_article_prompt_button = gr.Button("刪除", size="sm", scale=0.5, min_width=100)
 
             with gr.Row():
                 report_prompt_selector = gr.Dropdown(choices=report_summary_prompts, label="Report生成提示詞") #, allow_custom_value=True)
@@ -421,7 +454,7 @@ with gr.Blocks() as demo:
                         promptFileNameReport = gr.Textbox(show_label=False, lines=1, container=False)
                     with gr.Row():
                         save_report_button = gr.Button("保存或創建", size="sm", scale=0.5, min_width=100)
-                        delete_report_prompt = gr.Button("刪除", size="sm", scale=0.5, min_width=100)
+                        delete_report_prompt_button = gr.Button("刪除", size="sm", scale=0.5, min_width=100)
 
             with gr.Row():
                 overwriteExistPromptFile = gr.Checkbox(label="覆蓋已存在文件", value=False)
@@ -448,6 +481,8 @@ with gr.Blocks() as demo:
     save_report_button.click(save_create_prompt_file_report, [user_input, report_prompt_selector, overwriteExistPromptFile, promptFileNameReport],
                              [report_prompt_selector, status_label], show_progress=True)
     # create_prompt_button.click(create_new_prompt, [user_input], [status_label], show_progress=True)
+    delete_article_prompt_button.click(delete_article_prompt_file, [article_prompt_selector], [article_prompt_selector, status_label], show_progress=True)
+    delete_report_prompt_button.click(delete_report_prompt_file, [report_prompt_selector], [report_prompt_selector, status_label], show_progress=True)
 
     article_prompt_selector.select(on_article_selector_change, None, [user_input, status_label, promptFileNameArticle])
     report_prompt_selector.select(on_report_selector_change, None, [user_input, status_label, promptFileNameReport])
