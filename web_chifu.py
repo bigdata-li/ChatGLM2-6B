@@ -93,32 +93,47 @@ def save_prompt_content(folder_path, prompt_file_name, content, overwriteExist):
         return False
 
 # Callback for save button
-def save_create_prompt_file(content, overwriteExistFile):
+def save_create_prompt_file(content, overwriteExistFile, promptFileName):
+    global current_selector, current_selected_item, status_state
+
     try:
         if not current_selector or not current_selected_item:
             update_status("請先選擇提示詞類型。")
-            return
+            return None, status_state.value
         
         if content == "":
             update_status("請先輸入提示詞內容。")
-            return
+            return None, status_state.value
+        
+        createNewFile = current_selected_item != promptFileName        
         
         folder_path = ARTICLE_PROMPT_FOLDER if current_selector == 'Article' else REPORT_PROMPT_FOLDER
 
-        # Save the content to the new prompt file
-        if not save_prompt_content(folder_path, current_selected_item, content, overwriteExistFile):
-            return
+        log(f"Before saving prompt file {promptFileName} of {current_selector}... current_selected_item={current_selected_item} createNewFile={createNewFile} folder_path={folder_path}")
 
-        # Refresh the current_selector control to reload from its folder
-        if current_selector == 'Article':
-            article_summary_prompts[:] = load_prompts_from_folder(ARTICLE_PROMPT_FOLDER)
-            article_prompt_selector.choices = article_summary_prompts
+        # Save the content to the new prompt file
+        if not save_prompt_content(folder_path, promptFileName, content, overwriteExistFile):
+            return None, status_state.value
+
+        if createNewFile:
+            log(f"Refreshing {current_selector} prompt selector...")
+
+            current_selected_item = promptFileName
+
+            if current_selector == 'Article':
+                article_summary_prompts[:] = load_prompts_from_folder(ARTICLE_PROMPT_FOLDER)
+                log(f"Updating article_prompt_selector with choices: {article_summary_prompts}")
+                return gr.Dropdown.update(choices=article_summary_prompts), status_state.value
+            else:
+                report_summary_prompts[:] = load_prompts_from_folder(REPORT_PROMPT_FOLDER)
+                log(f"Updating report_prompt_selector with choices: {report_summary_prompts}")
+                return gr.Dropdown.update(choices=report_summary_prompts), status_state.value
         else:
-            report_summary_prompts[:] = load_prompts_from_folder(REPORT_PROMPT_FOLDER)
-            report_prompt_selector.choices = report_summary_prompts
+            return None, status_state.value
 
     finally:
-        return status_state.value
+        log(f"Finished saving prompt file {promptFileName} of {current_selector}.")
+        # return None, status_state.value
 
 def process_uploaded_files(file_wrappers):
     """
@@ -408,14 +423,15 @@ with gr.Blocks() as demo:
     history = gr.State([])
     past_key_values = gr.State(None)
 
-    save_button.click(save_create_prompt_file, [user_input, overwriteExistPromptFile], [status_label], show_progress=True)
+    save_button.click(save_create_prompt_file, [user_input, overwriteExistPromptFile, promptFileName], 
+                      [report_prompt_selector, status_label], show_progress=True)
     # create_prompt_button.click(create_new_prompt, [user_input], [status_label], show_progress=True)
 
     article_prompt_selector.select(on_article_selector_change, None, [user_input, status_label, promptFileName])
     report_prompt_selector.select(on_report_selector_change, None, [user_input, status_label, promptFileName])
 
-    article_prompt_selector.change(on_dropdown_change_article, article_prompt_selector, status_label)
-    report_prompt_selector.change(on_dropdown_change_report, article_prompt_selector, status_label)
+    # article_prompt_selector.change(on_dropdown_change_article, article_prompt_selector, status_label)
+    # report_prompt_selector.change(on_dropdown_change_report, article_prompt_selector, status_label)
 
     submitBtn.click(predict, [user_input, file_uploads, chatbot, max_length, top_p, temperature, history, past_key_values, downloadUrlContent],
                     [chatbot, history, past_key_values, status_label], show_progress=True)
