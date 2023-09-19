@@ -100,6 +100,16 @@ def save_prompt_content(folder_path, prompt_file_name, content, overwriteExist):
 #         selected = selected_item if selected_item else report_summary_prompts[0]
 #         return gr.Dropdown.update(choices=report_summary_prompts, value=selected), status_state.value
 
+def refresh_article_selector_choices(selected_item=None):
+    (updateChoice, updateStatus) = refreshSelectorChoices('Article', selected_item)
+    update_status(f"刷新了文章提示詞列表共計{len(article_summary_prompts)}個提示詞。")
+    return updateChoice, updateStatus
+
+def refresh_report_selector_choices(selected_item=None):
+    (updateChoice, updateStatus) = refreshSelectorChoices('Report', selected_item)
+    update_status(f"刷新了報告提示詞列表共計{len(report_summary_prompts)}個提示詞。")
+    return updateChoice, updateStatus
+
 def refreshSelectorChoices(selector_type, selected_item=None):
     folder = ARTICLE_PROMPT_FOLDER if selector_type == 'Article' else REPORT_PROMPT_FOLDER
     prompts = load_prompts_from_folder(folder)
@@ -425,7 +435,7 @@ https://www.cnbc.com/2023/09/05/bond-yield-jump-is-not-death-to-equities-bofas-s
 """
 
 with gr.Blocks() as demo:
-    gr.HTML("""<h1 align="center">ChifuGPT v0.1</h1>""")
+    gr.HTML("""<h1 align="center">ChifuGPT v0.2</h1>""")
 
     chatbot = gr.Chatbot()
     with gr.Row():
@@ -444,8 +454,9 @@ with gr.Blocks() as demo:
                     with gr.Row():
                         promptFileNameArticle = gr.Textbox(show_label=False, lines=1, container=False)
                     with gr.Row():
-                        save_article_button = gr.Button("保存或創建", size="sm", scale=0.5, min_width=100)
-                        delete_article_prompt_button = gr.Button("刪除", size="sm", scale=0.5, min_width=100)
+                        save_article_button = gr.Button("保存/創建", size="sm", scale=0.5, min_width=100)                        
+                        refresh_article_prompt_button = gr.Button("刷新", size="sm", scale=0.25, min_width=60)
+                        delete_article_prompt_button = gr.Button("刪除", size="sm", scale=0.25, min_width=60)
 
             with gr.Row():
                 report_prompt_selector = gr.Dropdown(choices=report_summary_prompts, label="Report生成提示詞") #, allow_custom_value=True)
@@ -453,8 +464,9 @@ with gr.Blocks() as demo:
                     with gr.Row():
                         promptFileNameReport = gr.Textbox(show_label=False, lines=1, container=False)
                     with gr.Row():
-                        save_report_button = gr.Button("保存或創建", size="sm", scale=0.5, min_width=100)
-                        delete_report_prompt_button = gr.Button("刪除", size="sm", scale=0.5, min_width=100)
+                        save_report_button = gr.Button("保存/創建", size="sm", scale=0.5, min_width=100)
+                        refresh_report_prompt_button = gr.Button("刷新", size="sm", scale=0.25, min_width=60)
+                        delete_report_prompt_button = gr.Button("刪除", size="sm", scale=0.25, min_width=60)
 
             with gr.Row():
                 overwriteExistPromptFile = gr.Checkbox(label="覆蓋已存在文件", value=False)
@@ -466,10 +478,20 @@ with gr.Blocks() as demo:
                     status_label = gr.Textbox(label="Status", interactive=False, value=status_state.value)
                     
         with gr.Column(scale=1):
-            emptyBtn = gr.Button("Clear History")
+            emptyBtn = gr.Button("Clear History", scale=0)
             max_length = gr.Slider(0, 32768, value=8192, step=1.0, label="Maximum length", interactive=True)
             top_p = gr.Slider(0, 1, value=0.8, step=0.01, label="Top P", interactive=True)
-            temperature = gr.Slider(0, 1, value=0.95, step=0.01, label="Temperature", interactive=True)
+            temperature = gr.Slider(0, 1, value=0.4, step=0.01, label="Temperature", interactive=True)
+
+            sliderInstruction = """
+Maximum length - 指聊天機器人將生成的最多詞彙數量。
+
+Top P - 在生成過程的每個步驟中賦予最有可能的 p 個詞彙的概率質量。這有助於防止聊天機器人生成重複或無意義的文本。
+
+Temperature - 控制生成過程隨機性的參數。較高的 temperature 將導致更具創造性和多樣性的文本，但也可能更無意義。
+            """
+            # Add a read only textbox to display explanation of the above sliders
+            gr.Textbox(show_label=False, interactive=False, value=sliderInstruction, container=False, lines=6)
 
     user_input.value = sampleInput
     
@@ -480,9 +502,13 @@ with gr.Blocks() as demo:
                               [article_prompt_selector, status_label], show_progress=True)
     save_report_button.click(save_create_prompt_file_report, [user_input, report_prompt_selector, overwriteExistPromptFile, promptFileNameReport],
                              [report_prompt_selector, status_label], show_progress=True)
+    
     # create_prompt_button.click(create_new_prompt, [user_input], [status_label], show_progress=True)
     delete_article_prompt_button.click(delete_article_prompt_file, [article_prompt_selector], [article_prompt_selector, status_label], show_progress=True)
     delete_report_prompt_button.click(delete_report_prompt_file, [report_prompt_selector], [report_prompt_selector, status_label], show_progress=True)
+
+    refresh_article_prompt_button.click(refresh_article_selector_choices, [article_prompt_selector], [article_prompt_selector, status_label], show_progress=True)
+    refresh_report_prompt_button.click(refresh_report_selector_choices, [report_prompt_selector], [report_prompt_selector, status_label], show_progress=True)
 
     article_prompt_selector.select(on_article_selector_change, None, [user_input, status_label, promptFileNameArticle])
     report_prompt_selector.select(on_report_selector_change, None, [user_input, status_label, promptFileNameReport])
