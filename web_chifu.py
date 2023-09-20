@@ -491,7 +491,7 @@ Top P - 在生成過程的每個步驟中賦予最有可能的 p 個詞彙的概
 Temperature - 控制生成過程隨機性的參數。較高的 temperature 將導致更具創造性和多樣性的文本，但也可能更無意義。
             """
             # Add a read only textbox to display explanation of the above sliders
-            gr.Textbox(show_label=False, interactive=False, value=sliderInstruction, container=False, lines=6)
+            gr.Textbox(show_label=False, interactive=False, value=sliderInstruction, container=False, lines=12)
 
     user_input.value = sampleInput
     
