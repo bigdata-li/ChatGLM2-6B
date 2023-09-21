@@ -416,7 +416,7 @@ def predict(input, uploaded_files, chatbot, max_length, top_p, temperature, hist
 
 
 def reset_user_input():
-    return gr.update(value='')
+    return gr.update(value=''), gr.update(value=None)
 
 
 def reset_state():
@@ -518,7 +518,7 @@ Temperature - 控制生成過程隨機性的參數。較高的 temperature 將�
 
     submitBtn.click(predict, [user_input, file_uploads, chatbot, max_length, top_p, temperature, history, past_key_values, downloadUrlContent],
                     [chatbot, history, past_key_values, status_label], show_progress=True)
-    submitBtn.click(reset_user_input, [], [user_input])
+    submitBtn.click(reset_user_input, [], [user_input, file_uploads])
 
     emptyBtn.click(reset_state, outputs=[chatbot, history, past_key_values], show_progress=True)
 
